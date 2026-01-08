@@ -1,5 +1,5 @@
-cmake
-libopenblas-dev
-liblapack-dev
-libx11-dev
-libgtk-3-dev
+streamlit
+opencv-python-headless
+mediapipe
+Pillow
+numpy
