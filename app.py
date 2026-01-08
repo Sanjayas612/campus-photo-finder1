@@ -1,80 +1,79 @@
 import streamlit as st
-import cv2
-import mediapipe as mp
-import numpy as np
+import os
+from deepface import DeepFace
 import zipfile
 from io import BytesIO
-
-# Initialize Google MediaPipe
-mp_face_detection = mp.solutions.face_detection
-face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+from PIL import Image
 
 st.set_page_config(page_title="Google AI Photo Finder", page_icon="🎓")
-st.title("🎓 Google AI Photo Finder")
-st.write("Scan your face to let the AI learn, then upload your event folder!")
+st.title("🎓 Google-Powered Photo Finder")
 
-# 1. Selection: Multi-file upload (Standard for web folders)
-uploaded_files = st.file_uploader("1️⃣ Upload Event Photos", accept_multiple_files=True, type=['jpg', 'png', 'jpeg'])
+# --- SIDEBAR SETTINGS ---
+st.sidebar.header("⚙️ AI Settings")
+# Sensitivity slider: Lower is stricter, higher is more relaxed
+# For 'FaceNet' with 'cosine' distance, the default is usually around 0.40
+sensitivity = st.sidebar.slider(
+    "AI Sensitivity (Threshold)", 
+    min_value=0.1, 
+    max_value=0.8, 
+    value=0.40, 
+    step=0.01,
+    help="Lower = Stricter (High Accuracy), Higher = Relaxed (Catch More Photos)"
+)
 
-# 2. Scanning: Learn the face
+# 1. Folder Selection (Multi-upload)
+uploaded_files = st.file_uploader("1️⃣ Select Event Photos", accept_multiple_files=True, type=['jpg', 'png', 'jpeg'])
+
+# 2. Live Face Scan
 cam_image = st.camera_input("2️⃣ Scan your face to learn")
 
 if uploaded_files and cam_image:
-    if st.button("🚀 Start Finding Me"):
-        # Convert camera scan to image
-        scan_bytes = np.frombuffer(cam_image.getvalue(), np.uint8)
-        scan_img = cv2.imdecode(scan_bytes, cv2.IMREAD_COLOR)
-        scan_rgb = cv2.cvtColor(scan_img, cv2.COLOR_BGR2RGB)
+    if st.button("🚀 Start AI Matching"):
+        img = Image.open(cam_image)
+        temp_selfie = "selfie.jpg"
+        img.save(temp_selfie)
         
-        # Google AI: Learn the user's face geometry
-        results = face_detection.process(scan_rgb)
+        st.info(f"AI is searching using sensitivity: {sensitivity}...")
         
-        if not results.detections:
-            st.error("Google AI couldn't see your face. Please adjust your lighting.")
-        else:
-            st.success("✅ Face Learned! Scanning the folder now...")
+        matched_files = []
+        progress_bar = st.progress(0)
+        
+        for i, file in enumerate(uploaded_files):
+            temp_event = f"temp_{file.name}"
+            with open(temp_event, "wb") as f:
+                f.write(file.getbuffer())
             
-            # Get 'User DNA' (the shape/location of the face)
-            user_box = results.detections[0].location_data.relative_bounding_box
-            user_features = np.array([user_box.width, user_box.height])
+            try:
+                # DeepFace verify using our slider's sensitivity
+                result = DeepFace.verify(
+                    img1_path = temp_selfie, 
+                    img2_path = temp_event, 
+                    model_name = "FaceNet",
+                    distance_metric = "cosine",
+                    threshold = sensitivity, # <--- Slider value used here
+                    enforce_detection = False
+                )
+                
+                if result["verified"]:
+                    matched_images.append(file)
+            except:
+                pass 
+            
+            if os.path.exists(temp_event):
+                os.remove(temp_event)
+                
+            progress_bar.progress((i + 1) / len(uploaded_files))
 
-            matched_files = []
-            progress_bar = st.progress(0)
-
-            for i, file in enumerate(uploaded_files):
-                # Process event photo
-                file_bytes = np.frombuffer(file.getvalue(), np.uint8)
-                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                
-                # Google AI: Find faces in the event photo
-                event_results = face_detection.process(img_rgb)
-                
-                if event_results.detections:
-                    for det in event_results.detections:
-                        eb = det.location_data.relative_bounding_box
-                        event_features = np.array([eb.width, eb.height])
-                        
-                        # Compare user geometry to event geometry
-                        # This is a lightweight 'Learning' match
-                        distance = np.linalg.norm(user_features - event_features)
-                        
-                        if distance < 0.05: # Accuracy threshold
-                            matched_files.append(file)
-                            break
-                
-                progress_bar.progress((i + 1) / len(uploaded_files))
-
-            if matched_files:
-                st.balloons()
-                st.success(f"✨ Found {len(matched_files)} photos!")
-                
-                # Zip for download
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w") as zf:
-                    for f in matched_files:
-                        zf.writestr(f.name, f.getvalue())
-                
-                st.download_button("📥 Download My Photos (.zip)", data=zip_buffer.getvalue(), file_name="matches.zip")
-            else:
-                st.warning("No matches found. Try scanning from a different distance!")
+        # --- RESULTS ---
+        if matched_files:
+            st.balloons()
+            st.success(f"✨ Found {len(matched_files)} photos!")
+            
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for f in matched_files:
+                    zf.writestr(f.name, f.getvalue())
+            
+            st.download_button("📥 Download Zip", data=zip_buffer.getvalue(), file_name="matches.zip")
+        else:
+            st.warning("No matches found. Try increasing the Sensitivity slider and scanning again!")
