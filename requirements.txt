@@ -1,5 +1,7 @@
 streamlit
-deepface
+streamlit-webrtc
+mediapipe
+face_recognition
 opencv-python-headless
-tf-keras
-numpy<2.0.0
+numpy
+Pillow
