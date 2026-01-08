@@ -1,5 +1,5 @@
 streamlit
-mediapipe
+deepface
 opencv-python-headless
-numpy
-Pillow
+tf-keras
+numpy<2.0.0
