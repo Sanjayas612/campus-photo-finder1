@@ -6,9 +6,13 @@ import zipfile
 from io import BytesIO
 from PIL import Image
 
-# Initialize Mediapipe Face Detection
-mp_face_detection = mp.solutions.face_detection
-face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+# NEW ROBUST INITIALIZATION
+try:
+    mp_face_detection = mp.solutions.face_detection
+    face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+except AttributeError:
+    st.error("Mediapipe initialization failed. Please wait while the server restarts.")
+    st.stop()
 
 st.set_page_config(page_title="Universal Photo Finder", page_icon="🎓")
 st.title("🎓 Campus Photo Finder (Fast Edition)")
@@ -61,3 +65,4 @@ if uploaded_files and cam_image:
             st.download_button("📥 Download Zip", data=zip_buffer.getvalue(), file_name="matches.zip")
         else:
             st.warning("No matches found. Try a different scan!")
+
