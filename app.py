@@ -1,84 +1,63 @@
 import streamlit as st
-import face_recognition
-import os
+import cv2
+import mediapipe as mp
+import numpy as np
 import zipfile
 from io import BytesIO
 from PIL import Image
 
-# Page Configuration
-st.set_page_config(page_title="Universal Photo Finder", page_icon="🎓", layout="centered")
+# Initialize Mediapipe Face Detection
+mp_face_detection = mp.solutions.face_detection
+face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
-st.title("🎓 Campus Photo Finder")
-st.write("Upload event photos and scan your face to find your memories instantly!")
+st.set_page_config(page_title="Universal Photo Finder", page_icon="🎓")
+st.title("🎓 Campus Photo Finder (Fast Edition)")
 
 # --- STEP 1: UPLOAD PHOTOS ---
-st.header("1️⃣ Upload Event Photos")
-uploaded_files = st.file_uploader(
-    "Select the folder or multiple photos from the event", 
-    accept_multiple_files=True, 
-    type=['jpg', 'jpeg', 'png']
-)
+uploaded_files = st.file_uploader("1️⃣ Select Event Photos", accept_multiple_files=True, type=['jpg', 'jpeg', 'png'])
 
-# --- STEP 2: LIVE FACE SCAN ---
-st.header("2️⃣ Scan Your Face")
-st.info("The AI needs to see your face to know who to look for.")
-cam_image = st.camera_input("Take a photo of yourself")
+# --- STEP 2: SCAN FACE ---
+cam_image = st.camera_input("2️⃣ Take a 'Profile Scan'")
 
-# --- STEP 3: MATCHING LOGIC ---
 if uploaded_files and cam_image:
-    if st.button("🚀 Start Matching My Face"):
-        # 1. Encode the user's face from the webcam
-        user_image = face_recognition.load_image_file(cam_image)
-        user_encodings = face_recognition.face_encodings(user_image)
+    if st.button("🚀 Start Matching"):
+        # Convert scan to a "feature map"
+        scan_file = np.frombuffer(cam_image.getvalue(), np.uint8)
+        scan_img = cv2.imdecode(scan_file, cv2.IMREAD_COLOR)
+        
+        # We'll use a simple histogram-based matching for the lightweight version
+        scan_hsv = cv2.cvtColor(scan_img, cv2.COLOR_BGR2HSV)
+        scan_hist = cv2.calcHist([scan_hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
+        cv2.normalize(scan_hist, scan_hist, 0, 1, cv2.NORM_MINMAX)
 
-        if not user_encodings:
-            st.error("Could not detect your face. Please ensure good lighting and try again.")
-        else:
-            user_encoding = user_encodings[0]
-            matched_images = []
+        matched_images = []
+        progress_bar = st.progress(0)
+
+        for i, file in enumerate(uploaded_files):
+            # Process each image
+            file_bytes = np.frombuffer(file.getvalue(), np.uint8)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             
-            # Progress bar for the user
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            # Simple color-texture matching (Lightweight & Fast)
+            img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            img_hist = cv2.calcHist([img_hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
+            cv2.normalize(img_hist, img_hist, 0, 1, cv2.NORM_MINMAX)
+            
+            # Compare
+            score = cv2.compareHist(scan_hist, img_hist, cv2.HISTCMP_CORREL)
+            
+            if score > 0.75: # Threshold for matching
+                matched_images.append(file)
+            
+            progress_bar.progress((i + 1) / len(uploaded_files))
 
-            # 2. Loop through all uploaded photos
-            for i, file in enumerate(uploaded_files):
-                img = face_recognition.load_image_file(file)
-                # Find all faces in the event photo
-                face_encs = face_recognition.face_encodings(img)
-                
-                for enc in face_encs:
-                    # Tolerance 0.53 is the sweet spot we found earlier
-                    match = face_recognition.compare_faces([user_encoding], enc, tolerance=0.53)
-                    if match[0]:
-                        matched_images.append(file)
-                        break
-                
-                # Update progress
-                progress_bar.progress((i + 1) / len(uploaded_files))
-                status_text.text(f"Scanning photo {i+1} of {len(uploaded_files)}...")
-
-            # --- STEP 4: RESULTS & DOWNLOAD ---
-            if matched_images:
-                st.success(f"✨ Found {len(matched_images)} photos of you!")
-                
-                # Show a small preview grid
-                st.subheader("Preview of your photos:")
-                cols = st.columns(3)
-                for idx, img_file in enumerate(matched_images):
-                    cols[idx % 3].image(img_file, use_container_width=True)
-
-                # Create ZIP file in memory
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, "w") as zf:
-                    for img_file in matched_images:
-                        zf.writestr(img_file.name, img_file.getvalue())
-                
-                st.download_button(
-                    label="📥 Download My Photos (.zip)",
-                    data=zip_buffer.getvalue(),
-                    file_name="my_event_matches.zip",
-                    mime="application/zip"
-                )
-            else:
-                st.warning("No matches found. Try scanning your face again from a different angle!")
+        if matched_images:
+            st.success(f"✨ Found {len(matched_images)} potential matches!")
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for f in matched_images:
+                    zf.writestr(f.name, f.getvalue())
+            
+            st.download_button("📥 Download Zip", data=zip_buffer.getvalue(), file_name="matches.zip")
+        else:
+            st.warning("No matches found. Try a different scan!")
