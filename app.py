@@ -1,78 +1,71 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer
 import cv2
 import numpy as np
+import os
+from deepface import DeepFace
 import zipfile
 from io import BytesIO
+from PIL import Image
 
-st.set_page_config(page_title="Campus Photo Finder", layout="centered")
-st.title("🎓 Smart Campus Photo Finder")
+st.set_page_config(page_title="Google AI Photo Finder", page_icon="🎓")
+st.title("🎓 Google-Powered Photo Finder")
+st.write("Using FaceNet AI to find your matches.")
 
-# Session State to store the 'Learned' facial data
-if 'user_face_samples' not in st.session_state:
-    st.session_state.user_face_samples = []
+# 1. Folder Selection (Multi-upload)
+uploaded_files = st.file_uploader("1️⃣ Select Event Photos", accept_multiple_files=True, type=['jpg', 'png', 'jpeg'])
 
-# 1. Folder Upload
-uploaded_files = st.file_uploader("1️⃣ Upload Event Photos", accept_multiple_files=True, type=['jpg','jpeg','png'])
+# 2. Live Face Scan
+cam_image = st.camera_input("2️⃣ Scan your face to learn")
 
-# 2. Live Scanner
-st.header("2️⃣ Live Face Scan")
-st.info("The AI is waiting. Move your head slowly when the camera starts.")
-
-class VideoProcessor:
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+if uploaded_files and cam_image:
+    if st.button("🚀 Start AI Matching"):
+        # Save camera scan to a temp file for DeepFace to read
+        img = Image.open(cam_image)
+        temp_selfie = "selfie.jpg"
+        img.save(temp_selfie)
         
-        # Using a very light face detector
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        st.info("AI is learning your facial features...")
         
-        for (x, y, w, h) in faces:
-            # Draw box and instruction
-            cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(img, "SCANNING...", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            # Save a sample of the face 'DNA' (Histogram)
-            roi_gray = gray[y:y+h, x:x+w]
-            hist = cv2.calcHist([roi_gray], [0], None, [256], [0, 256])
-            if len(st.session_state.user_face_samples) < 20:
-                st.session_state.user_face_samples.append(hist)
-
-        return img
-
-webrtc_streamer(key="scanner", video_processor_factory=VideoProcessor)
-
-# 3. Matching
-if st.button("🚀 Start Matching My Face"):
-    if not st.session_state.user_face_samples:
-        st.error("Scan your face first!")
-    elif not uploaded_files:
-        st.error("Upload photos first!")
-    else:
         matched_files = []
-        progress = st.progress(0)
+        progress_bar = st.progress(0)
         
         for i, file in enumerate(uploaded_files):
-            file_bytes = np.frombuffer(file.getvalue(), np.uint8)
-            img = cv2.imdecode(file_bytes, cv2.IMREAD_GRAYSCALE)
+            # Save event photo temporarily
+            temp_event = f"temp_{file.name}"
+            with open(temp_event, "wb") as f:
+                f.write(file.getbuffer())
             
-            # Simple but fast histogram comparison
-            img_hist = cv2.calcHist([img], [0], None, [256], [0, 256])
-            
-            for sample_hist in st.session_state.user_face_samples:
-                score = cv2.compareHist(sample_hist, img_hist, cv2.HISTCMP_CORREL)
-                if score > 0.85: # High matching threshold
+            try:
+                # AI Comparison using FaceNet (Google's Model)
+                result = DeepFace.verify(
+                    img1_path = temp_selfie, 
+                    img2_path = temp_event, 
+                    model_name = "FaceNet",
+                    distance_metric = "cosine",
+                    enforce_detection = False
+                )
+                
+                if result["verified"]:
                     matched_files.append(file)
-                    break
-            progress.progress((i + 1) / len(uploaded_files))
+            except Exception as e:
+                pass # Skip if no face is found in that specific photo
             
+            # Cleanup temp file
+            if os.path.exists(temp_event):
+                os.remove(temp_event)
+                
+            progress_bar.progress((i + 1) / len(uploaded_files))
+
         if matched_files:
-            st.success(f"✨ Found {len(matched_files)} matches!")
+            st.balloons()
+            st.success(f"✨ Found {len(matched_files)} photos!")
+            
+            # Create Zip
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
                 for f in matched_files:
                     zf.writestr(f.name, f.getvalue())
-            st.download_button("📥 Download Zip", zip_buffer.getvalue(), "matches.zip")
+            
+            st.download_button("📥 Download Zip", data=zip_buffer.getvalue(), file_name="matches.zip")
         else:
-            st.warning("No matches found. Try scanning from a different angle.")
+            st.warning("No matches found. Try scanning your face again in better light!")
