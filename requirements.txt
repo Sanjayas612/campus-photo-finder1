@@ -1,0 +1,6 @@
+cmake
+face-recognition
+streamlit
+opencv-python-headless
+Pillow
+numpy
