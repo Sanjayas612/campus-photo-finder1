@@ -1,4 +1,6 @@
-face-recognition==1.3.0
+cmake
+dlib-bin
+face_recognition
 streamlit
 opencv-python-headless
 Pillow
